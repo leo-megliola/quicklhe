@@ -121,42 +121,35 @@ bool consume_next(std::string_view& sv, T& value) {
     return ec == std::errc();
 }
 
-//std::runtime_error("Failed to consume header line from event number: " + std::to_string(s->n_events));
-//;  
-
 //process header and particles from event and put them directly into struct
 void processEvent(ParseState* s)
 {   
     std::string_view sv(s->charBuf);
+ 
+    // read headder (careful to save n_ptc for looping condation below)
+    int n_ptc = 0; 
+    if (!consume_next(sv, n_ptc)) throw std::runtime_error("Failed to parse particle count from event number: " + std::to_string(s->cur_event));
+    s->ievt_arr[0][s->cur_event] = n_ptc;
 
-    // prase header
-    int n_ptc = 0;
-    if (!consume_next(sv, n_ptc)) throw std::runtime_error("Failed to parse particle count from event number: " + std::to_string(s->n_events));
-
-    consume_next(sv, s->ievt_arr[?][?])
-    // Map your header data to fevt_arr / ievt_arr
-    // Example: reading the next 4 doubles in the header
-    for (int i = 0; i < 4; ++i) {
-        consume_next(sv, s->fevt_arr[?][?]);
+    consume_next(sv, s->ievt_arr[1][s->cur_event]);
+    
+    for (int i = 0; i < 4; i++) { // read doubles
+        consume_next(sv, s->fevt_arr[i][s->cur_event]);
     }
 
-    // --- Parse Particles ---
-    for (int p = 0; p < n_ptc; ++p) {
-        // Calculate the base index for this particle in your flat array
-        int p_idx = (state.cur_particle + p) * [COLUMNS_PER_PARTICLE];
-
-        // First 6 values are ints (based on your example)
-        for (int i = 0; i < 6; ++i) {
-            consume_next(sv, state.iptc_arr[p_idx + i]);
+    // read particles 
+    for (int p = 0; p < n_ptc; p++) {
+        s->iptc_arr[0][s->cur_particle] = s->cur_event;
+        // first 6 ints
+        for (int i = 1; i <= 6; i++) {
+            consume_next(sv, s->iptc_arr[i][s->cur_particle]);
         }
-        // Remaining values are doubles
+        // remaining 7 doubles
         for (int i = 0; i < 7; ++i) {
-            consume_next(sv, state.fptc_arr[p_idx + i]);
+            consume_next(sv, s->fptc_arr[i][s->cur_particle]);
         }
+        s->cur_particle++;
     }
-
-    state.cur_event++;
-    state.cur_particle += particles_in_event;
 }
 
 static void processWeight(ParseState* s)
@@ -182,7 +175,7 @@ static void XMLCALL onStart(void* ud, const XML_Char* name, const XML_Char** att
         s->cur_weight = 0;
     } else if (s->capture == EVENT_HEADER) {
         // for header, next <tag> is equivalent to onEnd(...) because header has no enclosing tag
-        int n_particles = processEventHeader(s);
+        processEvent(s);
         // simularly, particle lines have no tag, so they must be processed without callbacks
         for (int i=0; i>n_particles; ++i) // process particle for each particle in the event
             processParticle(s);
@@ -199,7 +192,7 @@ static void XMLCALL onEnd(void* ud, const XML_Char* name)
     ParseState* s = static_cast<ParseState*>(ud);
 
     if (std::strcmp(name, "event") == 0)
-        ++s->cur_event;
+        s->cur_event++;
     else if (std::strcmp(name, "wgt") == 0)
         processWeight(s);
 }
@@ -225,20 +218,20 @@ py::array_t<double> parseLHE(const std::string& filename)
         throw std::runtime_error("Found no events, weights, or particles.");
 
     // Double Arrays
-    py::array_t<double> f_evt({n_events, 4+n_weights});
-    py::array_t<double> f_ptc({n_particles, 7});
+    py::array_t<double> f_evt({4+n_weights, n_events});
+    py::array_t<double> f_ptc({7, n_particles});
     auto f_evt_buf = f_evt.request();
     auto f_ptc_buf = f_ptc.request();
-    std::memset(f_evt_buf.ptr, 0, sizeof(double) * n_events * (4+n_weights));
-    std::memset(f_ptc_buf.ptr, 0, sizeof(double) * n_particles * 7);
+    std::memset(f_evt_buf.ptr, 0, sizeof(double) * (4+n_weights) * n_events);
+    std::memset(f_ptc_buf.ptr, 0, sizeof(double) * 7 * n_particles);
 
     // Int Arrays
-    py::array_t<int> i_evt({n_events, 2});
-    py::array_t<int> i_ptc({n_particles, 7});
+    py::array_t<int> i_evt({2, n_events});
+    py::array_t<int> i_ptc({7, n_particles});
     auto i_evt_buf = i_evt.request();
     auto i_ptc_buf = i_ptc.request();
-    std::memset(i_evt_buf.ptr, 0, sizeof(int) * n_events * 2);
-    std::memset(i_ptc_buf.ptr, 0, sizeof(int) * n_particles * 7);
+    std::memset(i_evt_buf.ptr, 0, sizeof(int) * 2 * n_events);
+    std::memset(i_ptc_buf.ptr, 0, sizeof(int) * 7 * n_particles);
 
     std::ifstream f(filename, std::ios::binary);
     if (!f.is_open())
