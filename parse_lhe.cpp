@@ -165,7 +165,7 @@ static void processWeight(ParseState* s)
 {
     std::string_view sv(s->charBuf);
     double* fe = s->fevt_arr + s->cur_event * (4 + s->n_weights);
-    consume_next(sv, fe[s->cur_weight++]);
+    consume_next(sv, fe[4 + s->cur_weight++]);
     s->charBuf.clear();
     s->capture = NO_CAPTURE;
 }
