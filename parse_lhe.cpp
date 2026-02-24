@@ -27,6 +27,11 @@ Structure of init (gives some vital information about processes, Xsection, etc.)
 .
 .
 </init>
+
+i_evt : shape {n_events,   2}            cols: [NUP, IDPRUP]
+f_evt : shape {n_events,   4+n_weights}  cols: [XWGTUP, SCALUP, AQEDUP, AQCDUP, wgt_0, wgt_1, ...]
+i_ptc : shape {n_particles, 7}           cols: [evt_idx, IDUP, ISTUP, MOTHUP1, MOTHUP2, ICOLUP1, ICOLUP2]
+f_ptc : shape {n_particles, 7}           cols: [PUP1, PUP2, PUP3, PUP4, PUP5, VTIMUP, SPINUP]
 */
 #include <sstream>
 #include <fstream>
@@ -129,24 +134,28 @@ void processEvent(ParseState* s)
     // read headder (careful to save n_ptc for looping condation below)
     int n_ptc = 0; 
     if (!consume_next(sv, n_ptc)) throw std::runtime_error("Failed to parse particle count from event number: " + std::to_string(s->cur_event));
-    s->ievt_arr[0][s->cur_event] = n_ptc;
 
-    consume_next(sv, s->ievt_arr[1][s->cur_event]);
-    
+    int* ie = s->ievt_arr + s->cur_event * 2;
+    ie[0] = n_ptc;
+    consume_next(sv, ie[1]);
+
+    double* fe = s->fevt_arr + s->cur_event * (4 + s->n_weights);
     for (int i = 0; i < 4; i++) { // read doubles
-        consume_next(sv, s->fevt_arr[i][s->cur_event]);
+        consume_next(sv, fe[i]);
     }
 
     // read particles 
     for (int p = 0; p < n_ptc; p++) {
-        s->iptc_arr[0][s->cur_particle] = s->cur_event;
+        int*    ip = s->iptc_arr + s->cur_particle * 7;
+        double* fp = s->fptc_arr + s->cur_particle * 7;
+        ip[0] = s->cur_event;
         // first 6 ints
         for (int i = 1; i <= 6; i++) {
-            consume_next(sv, s->iptc_arr[i][s->cur_particle]);
+            consume_next(sv, ip[i]);
         }
         // remaining 7 doubles
         for (int i = 0; i < 7; ++i) {
-            consume_next(sv, s->fptc_arr[i][s->cur_particle]);
+            consume_next(sv, fp[i]);
         }
         s->cur_particle++;
     }
@@ -154,12 +163,9 @@ void processEvent(ParseState* s)
 
 static void processWeight(ParseState* s)
 {
-    double val = 0.0;
-    try { val = std::stod(s->charBuf); }
-    catch (...) {
-        throw std::runtime_error("Failed to parse weight value: '" + s->charBuf + "'");
-    }
-    s->wgt_array[s->cur_event * s->n_weights + s->cur_weight++] = val;
+    std::string_view sv(s->charBuf);
+    double* fe = s->fevt_arr + s->cur_event * (4 + s->n_weights);
+    consume_next(sv, fe[s->cur_weight++]);
     s->charBuf.clear();
     s->capture = NO_CAPTURE;
 }
@@ -177,8 +183,6 @@ static void XMLCALL onStart(void* ud, const XML_Char* name, const XML_Char** att
         // for header, next <tag> is equivalent to onEnd(...) because header has no enclosing tag
         processEvent(s);
         // simularly, particle lines have no tag, so they must be processed without callbacks
-        for (int i=0; i>n_particles; ++i) // process particle for each particle in the event
-            processParticle(s);
         s->charBuf.clear(); //end of event-level data (remainder has enclosing tags)
         s->capture = NO_CAPTURE;
     }
@@ -209,7 +213,7 @@ static void XMLCALL onChar(void* ud, const XML_Char* buf, int len)
 // double passes LHE file, first to extract numbers of events, weights, and particles,
 // then to read all values into preallocated arrays passed directly into nupmy structures by pybind11
 // ---------------------------------------------------------------------------
-py::array_t<double> parseLHE(const std::string& filename)
+py::tuple parseLHE(const std::string& filename)
 {
     // --- Pass 1 ---
     auto [n_events, n_weights, n_particles] = countDimensions(filename);
@@ -218,20 +222,20 @@ py::array_t<double> parseLHE(const std::string& filename)
         throw std::runtime_error("Found no events, weights, or particles.");
 
     // Double Arrays
-    py::array_t<double> f_evt({4+n_weights, n_events});
-    py::array_t<double> f_ptc({7, n_particles});
+    py::array_t<double> f_evt({n_events, 4 + n_weights});
+    py::array_t<double> f_ptc({n_particles, 7});
     auto f_evt_buf = f_evt.request();
     auto f_ptc_buf = f_ptc.request();
-    std::memset(f_evt_buf.ptr, 0, sizeof(double) * (4+n_weights) * n_events);
-    std::memset(f_ptc_buf.ptr, 0, sizeof(double) * 7 * n_particles);
+    std::memset(f_evt_buf.ptr, 0, sizeof(double) * n_events * (4 + n_weights));
+    std::memset(f_ptc_buf.ptr, 0, sizeof(double) * n_particles * 7);
 
     // Int Arrays
-    py::array_t<int> i_evt({2, n_events});
-    py::array_t<int> i_ptc({7, n_particles});
+    py::array_t<int> i_evt({n_events, 2});
+    py::array_t<int> i_ptc({n_particles, 7});
     auto i_evt_buf = i_evt.request();
     auto i_ptc_buf = i_ptc.request();
-    std::memset(i_evt_buf.ptr, 0, sizeof(int) * 2 * n_events);
-    std::memset(i_ptc_buf.ptr, 0, sizeof(int) * 7 * n_particles);
+    std::memset(i_evt_buf.ptr, 0, sizeof(int) * n_events * 2);
+    std::memset(i_ptc_buf.ptr, 0, sizeof(int) * n_particles * 7);
 
     std::ifstream f(filename, std::ios::binary);
     if (!f.is_open())
@@ -247,7 +251,7 @@ py::array_t<double> parseLHE(const std::string& filename)
 
     state.n_events  = n_events;
     state.n_weights = n_weights;
-    state.n_particles = n_particles
+    state.n_particles = n_particles;
 
     XML_Parser parser = XML_ParserCreate(nullptr);
     XML_SetUserData(parser, &state);
@@ -282,7 +286,7 @@ py::array_t<double> parseLHE(const std::string& filename)
     if (parseError)
         throw std::runtime_error(errorMsg);
 
-    return arr;
+    return py::make_tuple(i_evt, f_evt, i_ptc, f_ptc);
 }
 
 // ---------------------------------------------------------------------------
