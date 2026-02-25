@@ -1,6 +1,6 @@
 /* 
    Build: 
-   c++ -O2 -std=c++17 -shared -fPIC $(python3 -m pybind11 --includes) 
+   c++ -O2 -std=c++17 -shared -fPIC $(python3 -m pybind11 --includes) \
    -lexpat -o lhe_parser$(python3-config --extension-suffix) parse_lhe.cpp
 */
 
@@ -83,6 +83,7 @@ static std::tuple<int,int,int> countDimensions(const std::string& filename)
 static constexpr int NO_CAPTURE   = 0;
 static constexpr int EVENT_HEADER = 1;
 static constexpr int WGT_TAG      = 2;
+static constexpr int REWGT_BLOCK  = 3;
 
 struct ParseState
 {
@@ -91,8 +92,12 @@ struct ParseState
     double*     fptc_arr     = nullptr;
     int*        iptc_arr     = nullptr;
 
-    int         n_weights    = 0;        
-    int         n_events     = 0;   
+    py::dict    reweight;
+    std::string current_rwgt_group;
+    int         current_rwgt_id;
+
+    int         n_weights    = 0;
+    int         n_events     = 0;
     int         n_particles  = 0;
 
     int         cur_event    = 0;        // current row index
@@ -100,7 +105,7 @@ struct ParseState
     int         cur_particle = 0;
     int         capture      = NO_CAPTURE;
 
-    std::string charBuf;               // accumulates character data
+    std::string charBuf;                 // accumulates character data
 };
 
 // helper to traverse charBuf and extract int/double values with no copy or string convert
@@ -194,6 +199,34 @@ static void XMLCALL onStart(void* ud, const XML_Char* name, const XML_Char** att
 
     if (std::strcmp(name, "wgt") == 0)
         s->capture = WGT_TAG;
+    else if (std::strcmp(name, "initrwgt") == 0)
+        s->capture = REWGT_BLOCK;
+    else if (s->capture == REWGT_BLOCK) {
+        if (std::strcmp(name, "weightgroup") == 0) {
+            py::dict d;
+            for (int i = 0; attributes[i]; i += 2) {
+                if (std::strcmp(attributes[i], "name") == 0) {
+                    s->current_rwgt_group = attributes[i+1];
+                    s->reweight[attributes[i+1]] = d;
+                } else if (std::strcmp(attributes[i], "combine") == 0) {
+                    d["combine"] = attributes[i+1];
+                }
+            }
+        }
+        else if (std::strcmp(name, "weight") == 0) {
+            // <weight id="3" MUR="0.5"  MUF="0.5"  DYN_SCALE="2"  PDF="247000" > MUR=0.5 MUF=0.5 dyn_scale_choice=HT  </weight>
+            py::dict d;
+            for (int i = 0; attributes[i]; i += 2) {
+                if (std::strcmp(attributes[i], "id") == 0) {
+                    int id = std::atoi(attributes[i+1]);
+                    s->current_rwgt_id = id;
+                    s->reweight[py::str(s->current_rwgt_group)][py::int_(id)] = d; // convert id (key) to int
+                } else {
+                    d[py::str(attributes[i])] = py::str(attributes[i+1]);
+                }
+            }
+        }
+    }
 }
 
 static void XMLCALL onEnd(void* ud, const XML_Char* name)
@@ -204,6 +237,12 @@ static void XMLCALL onEnd(void* ud, const XML_Char* name)
         s->cur_event++;
     else if (std::strcmp(name, "wgt") == 0)
         processWeight(s);
+    else if (std::strcmp(name, "initrwgt") == 0)
+        s->capture = NO_CAPTURE;
+    else if (std::strcmp(name, "weight") == 0) {
+        s->reweight[py::str(s->current_rwgt_group)][py::int_(s->current_rwgt_id)][py::str("contents")] = std::string(s->charBuf);
+        s->charBuf.clear();
+    }
 }
 
 static void XMLCALL onChar(void* ud, const XML_Char* buf, int len)
@@ -291,7 +330,7 @@ py::tuple parseLHE(const std::string& filename)
     if (parseError)
         throw std::runtime_error(errorMsg);
 
-    return py::make_tuple(i_evt, f_evt, i_ptc, f_ptc);
+    return py::make_tuple(state.reweight, i_evt, f_evt, i_ptc, f_ptc);
 }
 
 // ---------------------------------------------------------------------------
