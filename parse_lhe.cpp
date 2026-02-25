@@ -1,9 +1,8 @@
-// lhe_parser.cpp
-// Build: c++ -O2 -std=c++17 -shared -fPIC \
-//   $(python3 -m pybind11 --includes) \
-//   -lexpat \
-//   -o lhe_parser$(python3-config --extension-suffix) \
-//   lhe_parser.cpp
+/* 
+   Build: 
+   c++ -O2 -std=c++17 -shared -fPIC $(python3 -m pybind11 --includes) 
+   -lexpat -o lhe_parser$(python3-config --extension-suffix) parse_lhe.cpp
+*/
 
 /*
 Structure of event: 
@@ -115,6 +114,12 @@ bool consume_next(std::string_view& sv, T& value) {
     // find end of token
     size_t end = sv.find_first_of(" \t\n\r");
     std::string_view token = sv.substr(0, end);
+
+    // fails on a leading '+' for floating point values
+    if constexpr (std::is_floating_point_v<T>) {
+        if (!token.empty() && token[0] == '+')
+            token.remove_prefix(1);
+    }
 
     // use from_chars to convert to int/double
     auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), value);
