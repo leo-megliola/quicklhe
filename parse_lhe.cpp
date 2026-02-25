@@ -206,14 +206,13 @@ static void XMLCALL onStart(void* ud, const XML_Char* name, const XML_Char** att
             py::dict d;
             for (int i = 0; attributes[i]; i += 2) {
                 if (std::strcmp(attributes[i], "name") == 0) {
-                    s->current_rwgt_group = attributes[i+1];
+                    s->current_rwgt_group = py::str(attributes[i+1]);
                     s->reweight[attributes[i+1]] = d;
                 } else if (std::strcmp(attributes[i], "combine") == 0) {
-                    d["combine"] = attributes[i+1];
+                    d["combine"] = py::str(attributes[i+1]);
                 }
             }
-        }
-        else if (std::strcmp(name, "weight") == 0) {
+        } else if (std::strcmp(name, "weight") == 0) {
             // <weight id="3" MUR="0.5"  MUF="0.5"  DYN_SCALE="2"  PDF="247000" > MUR=0.5 MUF=0.5 dyn_scale_choice=HT  </weight>
             py::dict d;
             for (int i = 0; attributes[i]; i += 2) {
