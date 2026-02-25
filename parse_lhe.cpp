@@ -220,6 +220,10 @@ static void XMLCALL onStart(void* ud, const XML_Char* name, const XML_Char** att
                     int id = std::atoi(attributes[i+1]);
                     s->current_rwgt_id = id;
                     s->reweight[py::str(s->current_rwgt_group)][py::int_(id)] = d; // convert id (key) to int
+                } else if (std::strcmp(attributes[i], "MUR") == 0 || std::strcmp(attributes[i], "MUF") == 0) {
+                    d[py::str(attributes[i])] = py::float_(std::atof(attributes[i+1]));
+                } else if (std::strcmp(attributes[i], "DYN_SCALE") == 0) {
+                    d[py::str(attributes[i])] = py::int_(std::atoi(attributes[i+1]));
                 } else {
                     d[py::str(attributes[i])] = py::str(attributes[i+1]);
                 }
