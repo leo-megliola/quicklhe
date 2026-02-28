@@ -158,7 +158,7 @@ void processEvent(ParseState* s)
     for (int p = 0; p < n_ptc; p++) {
         int*    ip = s->iptc_arr + s->cur_particle * 7;
         double* fp = s->fptc_arr + s->cur_particle * 7;
-        ip[0] = s->cur_event;
+        ip[0] = s->cur_event+1; //event number is 1-indexed on user-facing side
         // first 6 ints
         for (int i = 1; i <= 6; i++) {
             consume_next(sv, ip[i]);
@@ -169,6 +169,9 @@ void processEvent(ParseState* s)
         }
         s->cur_particle++;
     }
+
+    // some files have additional metadata marked '#'
+    // if necessary, parse those line here.
 }
 
 static void processWeight(ParseState* s)
